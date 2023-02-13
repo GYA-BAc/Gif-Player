@@ -5,6 +5,7 @@
 #include <vector>
 
 #define ASCII_GRADIENT " .\\'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+#define MIN(a, b) (a < b) ? a : b
 
 /* TERMS
 gct - global color table
@@ -184,15 +185,14 @@ void populate_color_table(std::ifstream& file, Color table[], int table_len) {
 void decompress_image(
     char lzw_buf[], int lzw_len,
     int min_lzw, 
-    Color table[], int table_len,
-    int img_width, int img_height,
+    int table_len,
     int index_buf[]
 ) {
     /*decompresses the LZW encoding used in GIF files
         use local color table if availiable*/
 
-    int codes_evaluated = 0;
-    #define APPEND_INDEX(index) index_buf[codes_evaluated++] = index
+    int ibuf_index = 0;
+    #define APPEND_INDEX(index) index_buf[ibuf_index++] = index
 
     unsigned long int bytes_evaluated = 0;
 
@@ -207,10 +207,13 @@ void decompress_image(
 
     std::vector<std::vector<int>> code_table;
     // two extra special codes at the end
-    #define INIT_CODE_TABLE() code_table = og_code_table
-
     const int re_init_code = pow(2, min_lzw);
     const int end_of_info = pow(2, min_lzw) + 1;
+
+    int table_end = end_of_info;
+
+    #define INIT_CODE_TABLE() code_table = og_code_table; table_end = end_of_info
+    #define APPEND_CODE_TABLE(entry) code_table.push_back(entry); table_end++
     
     // the codes being read are variable in length, but must fit
     // within 12 bits
@@ -219,45 +222,98 @@ void decompress_image(
     // since a code can span across multiple bytes, keep track of
     // how many bits of the current byte have already been read 
     // as part of the previous code
-    unsigned short cur_byte_offset = code_size % 8; 
+    unsigned short cur_byte_offset = 0; 
 
-    int prev_code;
+    int prev_code = -1;
     int cur_code;
 
-    while (bytes_evaluated < lzw_len) {
+    bool is_special;
+    int bits_evaluated;
+    int bits;
+
+    while (1) {
         // get code
+        is_special = false;
+
         cur_code = get_bits(cur_bits, 0, code_size);
-        std::cout << cur_code <<'\n';
-        std::cout << bytes_evaluated << '\n';
-        std::cout << cur_byte_offset << "==\n";
 
         if (cur_code == re_init_code) {
             INIT_CODE_TABLE();
+            is_special = true;
         } else if (cur_code == end_of_info) {
             break;
         } else {
-            for (int i : code_table[cur_code])
-                APPEND_INDEX(i);
+            if (cur_code <= table_end) {
+                for (int i : code_table[cur_code]) {
+                    APPEND_INDEX(i);
+                }
+                if (prev_code != -1) {
+                    std::vector<int> new_vec;
+                    for (int i : code_table[prev_code]) {
+                        new_vec.push_back(i);
+                    }
+                    new_vec.push_back(code_table[cur_code][0]);
+                    APPEND_CODE_TABLE(new_vec);
+                }
+            } else {
+                std::vector<int> new_vec;
+                for (int i : code_table[prev_code]) {
+                    APPEND_INDEX(i);
+                    new_vec.push_back(i);
+                }
+                APPEND_INDEX(code_table[prev_code][0]);
+                new_vec.push_back(code_table[prev_code][0]);
+                APPEND_CODE_TABLE(new_vec);
+            }
         }
-        prev_code = cur_code;
+        if (!is_special) 
+            prev_code = cur_code;
 
         // get next bits
+        bits_evaluated = 0;
         cur_bits = cur_bits >> code_size;
-        cur_byte_offset = (cur_byte_offset + code_size) % 8;
-        // at most, the next code can span across 3 bytes (depending on cur_offset and code size)
-        cur_bits |= get_bits(lzw_buf[bytes_evaluated++], cur_byte_offset, 8) << 16-code_size;
-        if (code_size > 8) {
-            if (cur_byte_offset <= 3)
-                cur_bits |= get_bits(lzw_buf[bytes_evaluated++], 0, 8) << code_size + 16 - cur_byte_offset;
-            cur_bits |= get_bits(lzw_buf[bytes_evaluated++], 0, cur_byte_offset) << 16 - code_size + cur_byte_offset + 8;
+        while (bits_evaluated < code_size) {
+            
+            bits = MIN(code_size-bits_evaluated, 8-cur_byte_offset);
+
+            cur_bits |= 
+                (unsigned short) get_bits(lzw_buf[bytes_evaluated], cur_byte_offset, bits)
+                << 16-code_size+bits_evaluated;
+
+            bits_evaluated += bits;
+            cur_byte_offset += bits;
+            if (cur_byte_offset >= 8)
+                bytes_evaluated++;
+            cur_byte_offset %= 8;
+        }
+        
+        if (table_end == pow(2, code_size)-1) {
+            code_size++;
         }
 
     }
+    //std::cout << ibuf_index;
 }
 
 
-void print_image(char image[], Color table[], int table_len) {
+void print_image(int image[], int img_width, int img_height, Color table[], int table_len) {
+    // convert color table to ascii format
+    char ascii_table[table_len];
+    for (int i = 0; i < table_len; i++) 
+        ascii_table[i] = color_to_ascii(table[i]);
 
+    std::string final = "";
+    for (int i = 0; i < img_height; i++) {
+        // since ascii characters as twice as tall as wide, cut off every other row
+        if (i % 2)
+            continue;
+        for (int j = 0; j < img_width; j++) {
+            final += ascii_table[image[i*img_width+j]];
+        }
+
+        final += '\n';
+    }
+    std::cout << final;
 }
 
 
@@ -350,7 +406,7 @@ int main(int argc, char *argv[]) {
     unsigned int img_pnt = 0;
 
     #define IMAGE_APPEND(chr) lzw_buf[img_pnt] = chr; img_pnt++
-
+    int img_block_size;
 
     do {
         READ_NEXT();
@@ -412,7 +468,6 @@ int main(int argc, char *argv[]) {
                 READ_NEXT();
                 int min_lzw = get_bits(temp[0], 0, 8);
 
-                int img_block_size;
                 do {
                     READ_NEXT();
                     img_block_size = get_bits(temp[0], 0, 8);
@@ -424,27 +479,29 @@ int main(int argc, char *argv[]) {
 
                 int index_stream[width*height];
 
-                // std::cout << min_lzw; return 0;
-
                 decompress_image(
                     lzw_buf, 
                     img_pnt-1, 
                     min_lzw, 
-                    (cur_img_desc.has_lct ? lct : gct),
                     (cur_img_desc.has_lct ? cur_img_desc.lct_size : gct_size),
-                    width, height,
                     index_stream
+                );
+
+                // system("cls");
+
+                print_image(
+                    index_stream, 
+                    width,
+                    height,
+                    (cur_img_desc.has_lct ? lct : gct), 
+                    (cur_img_desc.has_lct ? cur_img_desc.lct_size : gct_size)
                 );
 
                 stack_pointer = 0;
                 img_pnt = 0;
-
                 break;
         }
     } while (temp[0] != ';'); // ; is the marker for end of file
-
-
-
 
     file.close();
     
