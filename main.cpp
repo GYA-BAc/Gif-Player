@@ -337,9 +337,9 @@ void fill_frame(
     for (int i = 0; i < size; i++) {
         if (
             (int) i / full_width < img_desk.img_top ||
-            i / full_width > img_desk.img_top + img_desk.img_height ||
+            i / full_width >= img_desk.img_top + img_desk.img_height ||
             (int) i % full_width < img_desk.img_left ||
-            i % full_width > img_desk.img_left + img_desk.img_width
+            i % full_width >= img_desk.img_left + img_desk.img_width
         ) {
             continue;
         } else {
