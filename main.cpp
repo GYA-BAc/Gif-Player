@@ -6,7 +6,7 @@
 
 #include <windows.h>
 
-#define ASCII_GRADIENT "  .@!"//" .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+#define ASCII_GRADIENT " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
 #define MIN(a, b) (a < b) ? a : b
 #define TWOPOW(exp) (1 << exp)
 
@@ -252,10 +252,7 @@ void decompress_image(
         // get code
         is_special = false;
         cur_code = get_bits(cur_bits, 0, code_size);
-        //std::cout << "====\n";
-        //std::cout << table_end << '\n';
         if (cur_code == re_init_code) {
-            //std::cout << "reinit\n";
             INIT_CODE_TABLE();
             is_special = true;
             prev_code = -1;
@@ -272,12 +269,10 @@ void decompress_image(
                     for (int i : code_table[prev_code]) {
                         new_vec.push_back(i);
                     }
-                    //std::cout << "tabled\n";
                     new_vec.push_back(code_table[cur_code][0]);
                     APPEND_CODE_TABLE(new_vec);
                 }
             } else {
-                //std::cout << "no table\n";
                 if (prev_code != -1) {
                     std::vector<int> new_vec;
                     for (int i : code_table[prev_code]) {
@@ -316,7 +311,6 @@ void decompress_image(
         }
 
     }
-    //std::cout << ibuf_index;
 }
 
 
@@ -365,15 +359,8 @@ void print_frame(char frame[], int img_width, int img_height) {
         }
         final += '\n';
     }
-    std::cout << final << "aaaaaaaaaaaaaaaaaaaaaa\n";
-    //printf("%s", final.c_str());
-    //std::cout << "asdfasdfasdfasdf\n";
-    // if (gce.disposal_method == 2) {
-    //     //std::cout << "asdfasdfaaaaaaaaaaaaaaaaaaaaaa\n";
-    //     for (int i = 0; i < img_width*img_height; i++) {
-    //         frame[i] = bg_color;
-    //     }
-    // }
+    // I have no clue why, but adding characters at the end of cout is needed
+    std::cout << final << "                     \n";
 }
 
 
@@ -437,7 +424,6 @@ int main(int argc, char *argv[]) {
     int gct_size;
 
     char frame[height*width]; 
-    // 1 extra for newline @ end of each line, another for null byte
 
     // check individual bits using bitwise and operator
     if (packed & 0b10000000) {
@@ -565,20 +551,10 @@ int main(int argc, char *argv[]) {
                     gce,
                     cur_img_desc
                 );
-                // std::cout 
-                //     << cur_img_desc.interlaced << ' '
-                //     << gce.disposal_method << ' '
-                //     << gce.transparent << ' ' 
-                //     << cur_img_desc.img_left  << ' '
-                //     << cur_img_desc.img_top << ' ' 
-                //     << cur_img_desc.img_width  << ' '
-                //     << cur_img_desc.img_height << '\n' 
-                //     ;
 
                 print_frame(frame, width, height);
 
                 //Sleep((float) gce.delay*10);
-                // std::cin.get();
                 system("cls");
 
                 stack_pointer = 0;
