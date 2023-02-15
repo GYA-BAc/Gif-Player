@@ -1,11 +1,14 @@
 #include <iostream>
-#include <string.h>
+#include <string>
 #include <fstream>
 #include <math.h>
 #include <vector>
 
-#define ASCII_GRADIENT " .\\'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+#include <windows.h>
+
+#define ASCII_GRADIENT "  .@!"//" .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
 #define MIN(a, b) (a < b) ? a : b
+#define TWOPOW(exp) (1 << exp)
 
 /* TERMS
 gct - global color table
@@ -54,6 +57,11 @@ IMAGE HEADER            /IMAGE WIDTH
 
 */
 struct ImgDesc { /*Image Descriptor*/
+    int img_left;
+    int img_top;
+    int img_width;
+    int img_height;
+
     bool has_lct;
     bool interlaced;
     bool sorted;
@@ -84,7 +92,7 @@ int get_bits(unsigned src, int start, int numbits) {
     /* for every successive bit after the first,
         add an extra power of 2 to flip the next bit*/
     for (int i = 0; i < numbits; i++) {
-        bitmask += pow(2, i);
+        bitmask += TWOPOW(i);
     }
     /* first shift the input to the start bit
         then, bitwise-and with the bitmask to truncate
@@ -139,14 +147,23 @@ ImgDesc make_ImgDesc(char raw_bytes[]) {
     /*Return an Image Descriptor given its representation in raw bytes*/
     // ignore all but final byte
 
-    char packed = raw_bytes[9];
+    int img_left = combine_bytes(raw_bytes[0], raw_bytes[1]);
+    int img_top = combine_bytes(raw_bytes[2], raw_bytes[3]);
+    int img_width = combine_bytes(raw_bytes[4], raw_bytes[5]);
+    int img_height = combine_bytes(raw_bytes[6], raw_bytes[7]);
+
+    char packed = raw_bytes[8];
 
     bool has_lct = packed & 0b10000000;
     bool interlaced = packed & 0b01000000;
     bool sorted = packed & 0b00100000;;
-    int lct_size = pow(2, get_bits(packed, 0, 3)+1);
+    int lct_size = TWOPOW(get_bits(packed, 0, 3)+1);
 
     return ImgDesc {
+        img_left,
+        img_top,
+        img_width,
+        img_height,
         has_lct,
         interlaced,
         sorted,
@@ -207,8 +224,8 @@ void decompress_image(
 
     std::vector<std::vector<int>> code_table;
     // two extra special codes at the end
-    const int re_init_code = pow(2, min_lzw);
-    const int end_of_info = pow(2, min_lzw) + 1;
+    const int re_init_code = TWOPOW(min_lzw);
+    const int end_of_info = TWOPOW(min_lzw) + 1;
 
     int table_end = end_of_info;
 
@@ -234,12 +251,15 @@ void decompress_image(
     while (1) {
         // get code
         is_special = false;
-
         cur_code = get_bits(cur_bits, 0, code_size);
-
+        //std::cout << "====\n";
+        //std::cout << table_end << '\n';
         if (cur_code == re_init_code) {
+            //std::cout << "reinit\n";
             INIT_CODE_TABLE();
             is_special = true;
+            prev_code = -1;
+            code_size = min_lzw + 1;
         } else if (cur_code == end_of_info) {
             break;
         } else {
@@ -252,18 +272,22 @@ void decompress_image(
                     for (int i : code_table[prev_code]) {
                         new_vec.push_back(i);
                     }
+                    //std::cout << "tabled\n";
                     new_vec.push_back(code_table[cur_code][0]);
                     APPEND_CODE_TABLE(new_vec);
                 }
             } else {
-                std::vector<int> new_vec;
-                for (int i : code_table[prev_code]) {
-                    APPEND_INDEX(i);
-                    new_vec.push_back(i);
+                //std::cout << "no table\n";
+                if (prev_code != -1) {
+                    std::vector<int> new_vec;
+                    for (int i : code_table[prev_code]) {
+                        APPEND_INDEX(i);
+                        new_vec.push_back(i);
+                    }
+                    APPEND_INDEX(code_table[prev_code][0]);
+                    new_vec.push_back(code_table[prev_code][0]);
+                    APPEND_CODE_TABLE(new_vec);
                 }
-                APPEND_INDEX(code_table[prev_code][0]);
-                new_vec.push_back(code_table[prev_code][0]);
-                APPEND_CODE_TABLE(new_vec);
             }
         }
         if (!is_special) 
@@ -287,7 +311,7 @@ void decompress_image(
             cur_byte_offset %= 8;
         }
         
-        if (table_end == pow(2, code_size)-1) {
+        if (table_end == (1 << code_size)-1 && code_size < 12) {
             code_size++;
         }
 
@@ -296,24 +320,60 @@ void decompress_image(
 }
 
 
-void print_image(int image[], int img_width, int img_height, Color table[], int table_len) {
+void fill_frame(
+    char frame[], 
+    int index_stream[], int full_width, int full_height,
+    Color table[], int table_len,
+    GCE gce,
+    ImgDesc img_desk
+) {
     // convert color table to ascii format
     char ascii_table[table_len];
     for (int i = 0; i < table_len; i++) 
         ascii_table[i] = color_to_ascii(table[i]);
+    int size = full_height*full_width;
 
-    std::string final = "";
-    for (int i = 0; i < img_height; i++) {
-        // since ascii characters as twice as tall as wide, cut off every other row
-        if (i % 2)
+    int index = 0;
+    for (int i = 0; i < size; i++) {
+        if (
+            (int) i / full_width < img_desk.img_top ||
+            i / full_width > img_desk.img_top + img_desk.img_height ||
+            (int) i % full_width < img_desk.img_left ||
+            i % full_width > img_desk.img_left + img_desk.img_width
+        ) {
             continue;
-        for (int j = 0; j < img_width; j++) {
-            final += ascii_table[image[i*img_width+j]];
+        } else {
+            if (gce.transparent && gce.trans_color_idx == index_stream[index]) {
+                index++;
+                continue;
+            }
+            frame[i] = ascii_table[index_stream[index]];
+            index++;
         }
 
+    }
+}
+
+
+void print_frame(char frame[], int img_width, int img_height) {
+    std::string final = "";
+    for (int i = 0; i < img_height; i++) {
+        if (i % 2) // skip every other row
+            continue;
+        for (int j = 0; j < img_width; j++) {
+            final += frame[i*img_width + j];
+        }
         final += '\n';
     }
-    std::cout << final;
+    std::cout << final << "aaaaaaaaaaaaaaaaaaaaaa\n";
+    //printf("%s", final.c_str());
+    //std::cout << "asdfasdfasdfasdf\n";
+    // if (gce.disposal_method == 2) {
+    //     //std::cout << "asdfasdfaaaaaaaaaaaaaaaaaaaaaa\n";
+    //     for (int i = 0; i < img_width*img_height; i++) {
+    //         frame[i] = bg_color;
+    //     }
+    // }
 }
 
 
@@ -368,7 +428,7 @@ int main(int argc, char *argv[]) {
 
     unsigned short width  = combine_bytes(lsd_buf[0], lsd_buf[1]);
     unsigned short height = combine_bytes(lsd_buf[2], lsd_buf[3]);
-    std::cout << width << ' '<< height << '\n';
+    //std::cout << width << ' '<< height << '\n';
     // unpack this byte
     unsigned char packed = lsd_buf[4];
     bool has_gct = false; // has global color table?
@@ -376,18 +436,23 @@ int main(int argc, char *argv[]) {
     bool gct_sorted;
     int gct_size;
 
+    char frame[height*width]; 
+    // 1 extra for newline @ end of each line, another for null byte
+
     // check individual bits using bitwise and operator
     if (packed & 0b10000000) {
         has_gct = true;
         color_resolution = get_bits(packed, 4, 3) + 1;
         gct_sorted = packed & 0b00001000;
-        gct_size = pow(2, get_bits(packed, 0, 3)+1);
+        gct_size = TWOPOW(get_bits(packed, 0, 3)+1);
     }
 
     Color gct[gct_size];
     // populate global color table
     if (has_gct) 
         populate_color_table(file, gct, gct_size);
+    
+    int bg_color = lsd_buf[5];
 
     // after global color table, the contents of the file start
     char stack_buffer[256]; // buffer
@@ -402,11 +467,16 @@ int main(int argc, char *argv[]) {
     ImgDesc cur_img_desc;
     Color lct[265];
 
+    int min_lzw;
+
     char lzw_buf[width*height]; // encoded image data
     unsigned int img_pnt = 0;
 
     #define IMAGE_APPEND(chr) lzw_buf[img_pnt] = chr; img_pnt++
     int img_block_size;
+
+    int index_stream[width*height];
+
 
     do {
         READ_NEXT();
@@ -466,9 +536,9 @@ int main(int argc, char *argv[]) {
                 
                 // start of image data
                 READ_NEXT();
-                int min_lzw = get_bits(temp[0], 0, 8);
+                min_lzw = get_bits(temp[0], 0, 8);
 
-                do {
+                do { // read image
                     READ_NEXT();
                     img_block_size = get_bits(temp[0], 0, 8);
                     for (int i = 0; i < img_block_size; i++) {
@@ -476,8 +546,6 @@ int main(int argc, char *argv[]) {
                         IMAGE_APPEND(temp[0]);
                     }
                 } while (img_block_size != 0);
-
-                int index_stream[width*height];
 
                 decompress_image(
                     lzw_buf, 
@@ -487,15 +555,31 @@ int main(int argc, char *argv[]) {
                     index_stream
                 );
 
-                // system("cls");
-
-                print_image(
-                    index_stream, 
+                fill_frame(
+                    frame,
+                    index_stream,
                     width,
                     height,
                     (cur_img_desc.has_lct ? lct : gct), 
-                    (cur_img_desc.has_lct ? cur_img_desc.lct_size : gct_size)
+                    (cur_img_desc.has_lct ? cur_img_desc.lct_size : gct_size),
+                    gce,
+                    cur_img_desc
                 );
+                // std::cout 
+                //     << cur_img_desc.interlaced << ' '
+                //     << gce.disposal_method << ' '
+                //     << gce.transparent << ' ' 
+                //     << cur_img_desc.img_left  << ' '
+                //     << cur_img_desc.img_top << ' ' 
+                //     << cur_img_desc.img_width  << ' '
+                //     << cur_img_desc.img_height << '\n' 
+                //     ;
+
+                print_frame(frame, width, height);
+
+                //Sleep((float) gce.delay*10);
+                // std::cin.get();
+                system("cls");
 
                 stack_pointer = 0;
                 img_pnt = 0;
