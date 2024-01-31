@@ -1,5 +1,5 @@
-# Gif-Reader
-gif reader in c++
+# Gif-Player
+gif player in c++
 
 ![image](https://user-images.githubusercontent.com/97851399/218928277-6510afa5-a538-4074-af31-8c5253c62a94.png)
 
