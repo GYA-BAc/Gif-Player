@@ -3,11 +3,22 @@
 #include <fstream>
 #include <math.h>
 #include <vector>
+#include <cstdint>
+#include <cstring>
 
-#include <windows.h>
 
-#define ASCII_GRADIENT " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
+#ifdef __unix__
+	#define OS_LINUX 1
+	#include <unistd.h>
+#else
+	#define OS_LINUX 0
+	#include <windows.h>
+#endif
+
+
+#define GRADIENT " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$"
 #define MIN(a, b) (a < b) ? a : b
+#define MAX(a, b) (a > b) ? a : b
 #define TWOPOW(exp) (1 << exp)
 
 /* TERMS
@@ -112,8 +123,8 @@ int combine_bytes(char byte1, char byte2, bool little_endian = true) {
 
 
 char color_to_ascii(Color color) {
-    int brightness = (color.red + color.green + color.blue)/3;
-    return (ASCII_GRADIENT[brightness]);
+    float brightness = (color.red + color.green + color.blue)/3;
+    return (GRADIENT[MAX(0,((int) (brightness/255 * sizeof(GRADIENT)))-1)]);
 }
 
 
@@ -323,9 +334,11 @@ void fill_frame(
 ) {
     // convert color table to ascii format
     char ascii_table[table_len];
-    for (int i = 0; i < table_len; i++) 
+    for (int i = 0; i < table_len; i++) {
         ascii_table[i] = color_to_ascii(table[i]);
-    int size = full_height*full_width;
+		}
+    
+		int size = full_height*full_width;
 
     int index = 0;
     for (int i = 0; i < size; i++) {
@@ -338,8 +351,8 @@ void fill_frame(
             continue;
         } else {
             if (gce.transparent && gce.trans_color_idx == index_stream[index]) {
-                index++;
-                continue;
+								index++;
+								continue;
             }
             frame[i] = ascii_table[index_stream[index]];
             index++;
@@ -356,11 +369,11 @@ void print_frame(char frame[], int img_width, int img_height) {
             continue;
         for (int j = 0; j < img_width; j++) {
             final += frame[i*img_width + j];
-        }
+				}
         final += '\n';
-    }
-    // I have no clue why, but adding characters at the end of cout is needed
-    std::cout << final << "                     \n";
+		}
+		std::cout << final << '\n';
+
 }
 
 
@@ -371,7 +384,7 @@ void raise_user_error(const std::string &err_msg, const std::string &prg_name) {
 
 
 int main(int argc, char *argv[]) {
-    
+  	
     if (argc < 2) {
         raise_user_error("Error: too few program arguments", argv[0]);
         return 1;
@@ -415,8 +428,8 @@ int main(int argc, char *argv[]) {
 
     unsigned short width  = combine_bytes(lsd_buf[0], lsd_buf[1]);
     unsigned short height = combine_bytes(lsd_buf[2], lsd_buf[3]);
-    //std::cout << width << ' '<< height << '\n';
-    // unpack this byte
+    
+		// unpack this byte
     unsigned char packed = lsd_buf[4];
     bool has_gct = false; // has global color table?
     short color_resolution;
@@ -462,7 +475,6 @@ int main(int argc, char *argv[]) {
     int img_block_size;
 
     int index_stream[width*height];
-
 
     do {
         READ_NEXT();
@@ -554,8 +566,13 @@ int main(int argc, char *argv[]) {
 
                 print_frame(frame, width, height);
 
-                //Sleep((float) gce.delay*10);
-                system("cls");
+								#ifdef __unix__
+									usleep((float) gce.delay*10*1000);	
+								#else
+									Sleep((float) gce.delay*10);
+								#endif
+
+								system(OS_LINUX ? "clear" : "cls");
 
                 stack_pointer = 0;
                 img_pnt = 0;
