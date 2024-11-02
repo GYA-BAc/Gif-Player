@@ -10,6 +10,8 @@
 #ifdef __unix__
 	#define OS_LINUX 1
 	#include <unistd.h>
+	#include <sys/ioctl.h>
+	#include <stdio.h>
 #else
 	#define OS_LINUX 0
 	#include <windows.h>
@@ -361,13 +363,45 @@ void fill_frame(
     }
 }
 
-
 void print_frame(char frame[], int img_width, int img_height) {
+
+		float win_h;
+		float win_w;
+		float ratio_h;
+		float ratio_w;
+
+		// adjust for terminal size
+		#ifdef __unix__
+			struct winsize w;
+			ioctl(STDOUT_FILENO,  TIOCGWINSZ, &w);
+			win_h = w.ws_row;
+			win_w = w.ws_col;
+		#else
+			CONSOLE_SCREEN_BUFFER_INFO csbi;
+			GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+			win_h = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+			win_w = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+		#endif
+
+		ratio_h = ((float) img_height)/(win_h);
+		//ratio_w = ratio_h * ((float) img_width) / ((float) img_height * 2);
+		ratio_w = ((float) img_width)/(win_w);
+
     std::string final = "";
-    for (int i = 0; i < img_height; i++) {
-        if (i % 2) // skip every other row
+		int i_n = 0;
+    int j_n;
+		for (int i = 0; i < img_height; i++) {
+        if (i % 2) // skip every other row to preserve ratio
             continue;
+				if (ratio_h > 1 && i < ratio_h*(2*i_n+1)/2)
+					continue;
+				i_n++;
+
+				j_n = 0;
         for (int j = 0; j < img_width; j++) {
+						if (ratio_w > 1 && j < ratio_w*(2*j_n+1)/2)
+							continue;
+						j_n++;
             final += frame[i*img_width + j];
 				}
         final += '\n';
